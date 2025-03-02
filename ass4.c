@@ -33,7 +33,16 @@ struct command_line *parse_input() {
     // Get input
     printf(": ");
     fflush(stdout);
-    fgets(input, INPUT_LENGTH, stdin);
+    if (!fgets(input, INPUT_LENGTH, stdin)) {
+        free(curr_command);
+        exit(0); // Handle EOF (Ctrl+D)
+    }
+
+    // Ignore empty lines and comment lines (starting with #)
+    if (input[0] == '#' || input[0] == '\n') {
+        free(curr_command);
+        return NULL;
+    }
 
     // Tokenize the input
     char *token = strtok(input, " \n");
@@ -51,15 +60,6 @@ struct command_line *parse_input() {
     }
 
     return curr_command;
-}
-
-void kill_bg_processes() {
-    for (int i = 0; i < bg_count; i++) {
-        if (kill(bg_processes[i], SIGTERM) == 0) {
-            printf("Killed process %d\n", bg_processes[i]);
-            fflush(stdout);
-        }
-    }
 }
 
 void handle_exit() {
@@ -125,17 +125,14 @@ void handle_SIGINT(int signo) {
 }
 
 void handle_SIGTSTP(int signo) {
-    // Toggle background command behavior
     allow_bg = !allow_bg;
 
     if (allow_bg) {
-        printf("\nBackground processes are now allowed.\n");
+        write(STDOUT_FILENO, "\nBackground processes are now allowed.\n: ", 41);
     } else {
-        printf("\nBackground processes are now disabled.\n");
+        write(STDOUT_FILENO, "\nBackground processes are now disabled. Running jobs must complete in the foreground.\n: ", 93);
     }
-    fflush(stdout);
 }
-
 
 void execute_command(struct command_line *cmd) {
     pid_t spawnPid = fork();
@@ -146,45 +143,45 @@ void execute_command(struct command_line *cmd) {
     }
 
     if (spawnPid == 0) { // Child process
-        // Initialize sigaction structures for SIGINT and SIGTSTP
-        struct sigaction SIGINT_action = {0};
-        struct sigaction SIGTSTP_action = {0};
+        // Handle Input Redirection
+        if (cmd->input_file) {
+            int input_fd = open(cmd->input_file, O_RDONLY);
+            if (input_fd == -1) {
+                fprintf(stderr, "input file %s: No such file or directory\n", cmd->input_file);
+                exit(1);
+            }
+            dup2(input_fd, STDIN_FILENO);
+            close(input_fd);
+        }
 
-        // Initialize SIGINT action (parent ignores SIGINT)
-        SIGINT_action.sa_handler = handle_SIGINT;  // Ignore SIGINT in parent
-        SIGINT_action.sa_flags = 0;                 // No special flags
-        SIGINT_action.sa_restorer = NULL;           // Not used, initialize to NULL
-        sigemptyset(&SIGINT_action.sa_mask);        // Initialize the signal mask (empty set)
-        SIGINT_action.sa_sigaction = NULL;          // Not used, initialize to NULL
-        sigaction(SIGINT, &SIGINT_action, NULL);
+        // Handle Output Redirection
+        if (cmd->output_file) {
+            int output_fd = open(cmd->output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            if (output_fd == -1) {
+                fprintf(stderr, "output file %s: Permission denied\n", cmd->output_file);
+                exit(1);
+            }
+            dup2(output_fd, STDOUT_FILENO);
+            close(output_fd);
+        }
 
-        // Initialize SIGTSTP action (ignore SIGTSTP)
-        SIGTSTP_action.sa_handler = handle_SIGTSTP; // Handle SIGTSTP toggle
-        SIGTSTP_action.sa_flags = 0;                // No special flags
-        SIGTSTP_action.sa_restorer = NULL;          // Not used, initialize to NULL
-        sigemptyset(&SIGTSTP_action.sa_mask);       // Initialize the signal mask (empty set)
-        SIGTSTP_action.sa_sigaction = NULL;         // Not used, initialize to NULL
-        sigaction(SIGTSTP, &SIGTSTP_action, NULL);
-
-        // Execute the command
+        // Execute command
         execvp(cmd->argv[0], cmd->argv);
 
-        // If execvp fails:
+        // If execvp fails
         fprintf(stderr, "%s: command not found\n", cmd->argv[0]);
         exit(1);
     } else { // Parent process
         if (cmd->is_bg && allow_bg) {
-            // Background process allowed
             printf("Background PID: %d\n", spawnPid);
+            fflush(stdout);
         } else {
-            // No background process, or background not allowed
             int childStatus;
             waitpid(spawnPid, &childStatus, 0);
-            last_fg_status = childStatus; // Store for `status` command
+            last_fg_status = childStatus;
         }
     }
 }
-
 
 int main() {
     struct command_line *curr_command;
