@@ -92,70 +92,120 @@ void kill_bg_processes() {
 
 void execute_command(struct command_line *cmd) {
     pid_t spawnPid = fork();
+
     if (spawnPid == -1) {
         perror("fork failed");
         exit(1);
     }
-    if (spawnPid == 0) {
+
+    if (spawnPid == 0) { // Child process
+        struct sigaction SIGINT_default = {0};
+        SIGINT_default.sa_handler = SIG_DFL;  // Restore default SIGINT behavior
+        sigaction(SIGINT, &SIGINT_default, NULL);
+
+        // Handle input redirection
         if (cmd->input_file) {
             int input_fd = open(cmd->input_file, O_RDONLY);
             if (input_fd == -1) {
-                fprintf(stderr, "Error: Cannot open input file %s: %s\n", cmd->input_file, strerror(errno));
+                fprintf(stderr, "input file %s: No such file or directory\n", cmd->input_file);
                 exit(1);
             }
             dup2(input_fd, STDIN_FILENO);
             close(input_fd);
         }
+
+        // Handle output redirection
         if (cmd->output_file) {
             int output_fd = open(cmd->output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
             if (output_fd == -1) {
-                fprintf(stderr, "Error: Cannot open output file %s: %s\n", cmd->output_file, strerror(errno));
+                fprintf(stderr, "output file %s: Permission denied\n", cmd->output_file);
                 exit(1);
             }
             dup2(output_fd, STDOUT_FILENO);
             close(output_fd);
         }
+
         execvp(cmd->argv[0], cmd->argv);
-        perror(cmd->argv[0]);
+
+        // If execvp fails
+        fprintf(stderr, "%s: command not found\n", cmd->argv[0]);
         exit(1);
-    } else {
+    } else { // Parent process
         if (cmd->is_bg && allow_bg) {
-            if (bg_count < MAX_BG_PROCESSES) {
-                bg_processes[bg_count++] = spawnPid;
-            } else {
-                fprintf(stderr, "Error: Too many background processes.\n");
-            }
+            printf("Background PID: %d\n", spawnPid);
+            fflush(stdout);
         } else {
             int childStatus;
             waitpid(spawnPid, &childStatus, 0);
             last_fg_status = childStatus;
+
+            // If killed by SIGINT, print the signal number
+            if (WIFSIGNALED(childStatus)) {
+                printf("terminated by signal %d\n", WTERMSIG(childStatus));
+                fflush(stdout);
+            }
         }
     }
 }
 
+
+void handle_SIGTSTP(int signo) {
+    allow_bg = !allow_bg;
+
+    char *msg;
+    if (allow_bg) {
+        msg = "\nBackground processes are now allowed.\n: ";
+    } else {
+        msg = "\nBackground processes are now disabled. Running jobs must complete in the foreground.\n: ";
+    }
+
+    write(STDOUT_FILENO, msg, strlen(msg));
+    fflush(stdout);
+}
+
+void handle_SIGINT(int signo) {
+    write(STDOUT_FILENO, "\n", 1);
+    fflush(stdout);
+}
+
+
 int main() {
-    struct command_line *curr_command;
-    struct sigaction SIGTSTP_action = {0};
+    struct sigaction SIGTSTP_action = {0}, SIGINT_action = {0};
+
+    // SIGTSTP (Ctrl+Z) setup
     SIGTSTP_action.sa_handler = handle_SIGTSTP;
     sigemptyset(&SIGTSTP_action.sa_mask);
+    SIGTSTP_action.sa_flags = SA_RESTART;  // Ensure interrupted system calls restart
     sigaction(SIGTSTP, &SIGTSTP_action, NULL);
-    struct sigaction SIGINT_action = {0};
+
+    // SIGINT (Ctrl+C) setup
     SIGINT_action.sa_handler = handle_SIGINT;
     sigemptyset(&SIGINT_action.sa_mask);
+    SIGINT_action.sa_flags = SA_RESTART;  // Ensure interrupted system calls restart
     sigaction(SIGINT, &SIGINT_action, NULL);
+    
+    // Shell loop
     while (true) {
-        curr_command = parse_input();
+        check_background_processes();
+        struct command_line *curr_command = parse_input();
         if (!curr_command) continue;
+
         if (curr_command->argc > 0) {
             if (strcmp(curr_command->argv[0], "exit") == 0) {
                 free_command(curr_command);
-                kill_bg_processes();
-                exit(EXIT_SUCCESS);
+                handle_exit();
+            } else if (strcmp(curr_command->argv[0], "cd") == 0) {
+                handle_cd(curr_command);
+            } else if (strcmp(curr_command->argv[0], "status") == 0) {
+                handle_status();
             } else {
                 execute_command(curr_command);
             }
         }
+
         free_command(curr_command);
     }
+
     return EXIT_SUCCESS;
 }
+
