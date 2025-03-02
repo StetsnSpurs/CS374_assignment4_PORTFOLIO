@@ -28,50 +28,45 @@ struct command_line {
 
 struct command_line *parse_input() {
     char input[INPUT_LENGTH];
-    struct command_line *curr_command = calloc(1, sizeof(struct command_line));
+    struct command_line *curr_command = (struct command_line *) calloc(1, sizeof(struct command_line));
 
+    // Get input
     printf(": ");
     fflush(stdout);
+    
     if (!fgets(input, INPUT_LENGTH, stdin)) {
         free(curr_command);
-        exit(0);
+        return NULL;  // Handle EOF case
     }
 
+    // Ignore comments and blank lines
     if (input[0] == '#' || input[0] == '\n') {
         free(curr_command);
         return NULL;
     }
 
+    // Tokenize the input
     char *token = strtok(input, " \n");
     while (token) {
         if (!strcmp(token, "<")) {
-            char *next_token = strtok(NULL, " \n");
-            if (next_token) {
-                curr_command->input_file = strdup(next_token);
-            } else {
-                fprintf(stderr, "Error: Missing input file after '<'\n");
-                free(curr_command);
-                return NULL;
-            }
+            curr_command->input_file = strdup(strtok(NULL, " \n"));
         } else if (!strcmp(token, ">")) {
-            char *next_token = strtok(NULL, " \n");
-            if (next_token) {
-                curr_command->output_file = strdup(next_token);
-            } else {
-                fprintf(stderr, "Error: Missing output file after '>'\n");
-                free(curr_command);
-                return NULL;
-            }
+            curr_command->output_file = strdup(strtok(NULL, " \n"));
         } else if (!strcmp(token, "&") && allow_bg) {
-            if (!strtok(NULL, " \n")) {
-                curr_command->is_bg = true;
-            }
+            curr_command->is_bg = true;
         } else {
             curr_command->argv[curr_command->argc++] = strdup(token);
         }
         token = strtok(NULL, " \n");
     }
+
     return curr_command;
+}
+
+
+void handle_exit() {
+    kill_bg_processes();
+    exit(EXIT_SUCCESS);
 }
 
 void free_command(struct command_line *cmd) {
@@ -84,11 +79,65 @@ void free_command(struct command_line *cmd) {
     free(cmd);
 }
 
-void kill_bg_processes() {
-    for (int i = 0; i < bg_count; i++) {
-        kill(bg_processes[i], SIGTERM);
+void handle_cd(struct command_line *cmd) {
+    char *target_dir;
+
+    // No arguments: change to HOME directory
+    if (cmd->argc == 1) {
+        target_dir = getenv("HOME");
+        if (!target_dir) {
+            fprintf(stderr, "cd: HOME not set\n");
+            return;
+        }
+    } else {
+        target_dir = cmd->argv[1]; // Use provided directory
+    }
+
+    // Attempt to change directory
+    if (chdir(target_dir) != 0) {
+        fprintf(stderr, "cd: %s: %s\n", target_dir, strerror(errno));
     }
 }
+
+void handle_status() {
+    if (WIFEXITED(last_fg_status)) {
+        printf("exit status %d\n", WEXITSTATUS(last_fg_status));
+    } else if (WIFSIGNALED(last_fg_status)) {
+        printf("terminated by signal %d\n", WTERMSIG(last_fg_status));
+    }
+    fflush(stdout);
+}
+
+void check_background_processes() {
+    int childStatus;
+    pid_t pid;
+    
+    while ((pid = waitpid(-1, &childStatus, WNOHANG)) > 0) {
+        if (WIFEXITED(childStatus)) {
+            printf("Background PID %d terminated. Exit status: %d\n", pid, WEXITSTATUS(childStatus));
+        } else if (WIFSIGNALED(childStatus)) {
+            printf("Background PID %d terminated by signal %d\n", pid, WTERMSIG(childStatus));
+        }
+        fflush(stdout);
+    }
+}
+
+void handle_SIGINT(int signo) {
+    // Do nothing (parent ignores SIGINT)
+}
+
+void handle_SIGTSTP(int signo) {
+    // Toggle background command behavior
+    allow_bg = !allow_bg;
+
+    if (allow_bg) {
+        printf("\nBackground processes are now allowed.\n");
+    } else {
+        printf("\nBackground processes are now disabled.\n");
+    }
+    fflush(stdout);
+}
+
 
 void execute_command(struct command_line *cmd) {
     pid_t spawnPid = fork();
@@ -99,96 +148,71 @@ void execute_command(struct command_line *cmd) {
     }
 
     if (spawnPid == 0) { // Child process
-        struct sigaction SIGINT_default = {0};
-        SIGINT_default.sa_handler = SIG_DFL;  // Restore default SIGINT behavior
-        sigaction(SIGINT, &SIGINT_default, NULL);
+        // Initialize sigaction structures for SIGINT and SIGTSTP
+        struct sigaction SIGINT_action = {0};
+        struct sigaction SIGTSTP_action = {0};
 
-        // Handle input redirection
-        if (cmd->input_file) {
-            int input_fd = open(cmd->input_file, O_RDONLY);
-            if (input_fd == -1) {
-                fprintf(stderr, "input file %s: No such file or directory\n", cmd->input_file);
-                exit(1);
-            }
-            dup2(input_fd, STDIN_FILENO);
-            close(input_fd);
-        }
+        // Initialize SIGINT action (parent ignores SIGINT)
+        SIGINT_action.sa_handler = handle_SIGINT;  // Ignore SIGINT in parent
+        SIGINT_action.sa_flags = 0;                 // No special flags
+        SIGINT_action.sa_restorer = NULL;           // Not used, initialize to NULL
+        sigemptyset(&SIGINT_action.sa_mask);        // Initialize the signal mask (empty set)
+        SIGINT_action.sa_sigaction = NULL;          // Not used, initialize to NULL
+        sigaction(SIGINT, &SIGINT_action, NULL);
 
-        // Handle output redirection
-        if (cmd->output_file) {
-            int output_fd = open(cmd->output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-            if (output_fd == -1) {
-                fprintf(stderr, "output file %s: Permission denied\n", cmd->output_file);
-                exit(1);
-            }
-            dup2(output_fd, STDOUT_FILENO);
-            close(output_fd);
-        }
+        // Initialize SIGTSTP action (ignore SIGTSTP)
+        SIGTSTP_action.sa_handler = handle_SIGTSTP; // Handle SIGTSTP toggle
+        SIGTSTP_action.sa_flags = 0;                // No special flags
+        SIGTSTP_action.sa_restorer = NULL;          // Not used, initialize to NULL
+        sigemptyset(&SIGTSTP_action.sa_mask);       // Initialize the signal mask (empty set)
+        SIGTSTP_action.sa_sigaction = NULL;         // Not used, initialize to NULL
+        sigaction(SIGTSTP, &SIGTSTP_action, NULL);
 
+        // Execute the command
         execvp(cmd->argv[0], cmd->argv);
 
-        // If execvp fails
+        // If execvp fails:
         fprintf(stderr, "%s: command not found\n", cmd->argv[0]);
         exit(1);
     } else { // Parent process
         if (cmd->is_bg && allow_bg) {
+            // Background process allowed
             printf("Background PID: %d\n", spawnPid);
-            fflush(stdout);
         } else {
+            // No background process, or background not allowed
             int childStatus;
             waitpid(spawnPid, &childStatus, 0);
-            last_fg_status = childStatus;
-
-            // If killed by SIGINT, print the signal number
-            if (WIFSIGNALED(childStatus)) {
-                printf("terminated by signal %d\n", WTERMSIG(childStatus));
-                fflush(stdout);
-            }
+            last_fg_status = childStatus; // Store for `status` command
         }
     }
 }
 
 
-void handle_SIGTSTP(int signo) {
-    allow_bg = !allow_bg;
-
-    char *msg;
-    if (allow_bg) {
-        msg = "\nBackground processes are now allowed.\n: ";
-    } else {
-        msg = "\nBackground processes are now disabled. Running jobs must complete in the foreground.\n: ";
-    }
-
-    write(STDOUT_FILENO, msg, strlen(msg));
-    fflush(stdout);
-}
-
-void handle_SIGINT(int signo) {
-    write(STDOUT_FILENO, "\n", 1);
-    fflush(stdout);
-}
-
-
 int main() {
-    struct sigaction SIGTSTP_action = {0}, SIGINT_action = {0};
+    struct command_line *curr_command;
 
-    // SIGTSTP (Ctrl+Z) setup
+    // Initialize sigaction for SIGTSTP
+    struct sigaction SIGTSTP_action = {0};
     SIGTSTP_action.sa_handler = handle_SIGTSTP;
-    sigemptyset(&SIGTSTP_action.sa_mask);
-    SIGTSTP_action.sa_flags = SA_RESTART;  // Ensure interrupted system calls restart
+    SIGTSTP_action.sa_flags = 0;
+    SIGTSTP_action.sa_restorer = NULL;        // Not used, initialize to NULL
+    sigemptyset(&SIGTSTP_action.sa_mask);     // Initialize the signal mask (empty set)
+    SIGTSTP_action.sa_sigaction = NULL;       // Not used, initialize to NULL
     sigaction(SIGTSTP, &SIGTSTP_action, NULL);
 
-    // SIGINT (Ctrl+C) setup
-    SIGINT_action.sa_handler = handle_SIGINT;
-    sigemptyset(&SIGINT_action.sa_mask);
-    SIGINT_action.sa_flags = SA_RESTART;  // Ensure interrupted system calls restart
+    // Initialize sigaction for SIGINT (ignore SIGINT in the parent)
+    struct sigaction SIGINT_action = {0};
+    SIGINT_action.sa_handler = handle_SIGINT; // Ignore SIGINT in parent
+    SIGINT_action.sa_flags = 0;
+    SIGINT_action.sa_restorer = NULL;         // Not used, initialize to NULL
+    sigemptyset(&SIGINT_action.sa_mask);      // Initialize the signal mask (empty set)
+    SIGINT_action.sa_sigaction = NULL;        // Not used, initialize to NULL
     sigaction(SIGINT, &SIGINT_action, NULL);
-    
-    // Shell loop
+
     while (true) {
-        check_background_processes();
-        struct command_line *curr_command = parse_input();
-        if (!curr_command) continue;
+        check_background_processes(); // Check for completed background jobs
+        curr_command = parse_input();
+        if (!curr_command) continue; // Reprompt on blank or comment
 
         if (curr_command->argc > 0) {
             if (strcmp(curr_command->argv[0], "exit") == 0) {
@@ -199,7 +223,7 @@ int main() {
             } else if (strcmp(curr_command->argv[0], "status") == 0) {
                 handle_status();
             } else {
-                execute_command(curr_command);
+                execute_command(curr_command); // Handle external commands
             }
         }
 
@@ -208,4 +232,3 @@ int main() {
 
     return EXIT_SUCCESS;
 }
-
