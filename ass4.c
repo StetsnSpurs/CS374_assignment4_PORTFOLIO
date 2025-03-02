@@ -132,7 +132,8 @@ void check_background_processes() {
 }
 
 void handle_SIGINT(int signo) {
-    // Do nothing (parent ignores SIGINT)
+    char* message = "\nSIGINT is disabled for this process\n";
+    write(STDOUT_FILENO, message, 36);
 }
 
 void handle_SIGTSTP(int signo) {
@@ -140,9 +141,11 @@ void handle_SIGTSTP(int signo) {
     allow_bg = !allow_bg;
 
     if (allow_bg) {
-        printf("\nBackground processes are now allowed.\n");
+        char* message = "\nBackground processes are now allowed.\n";
+        write(STDOUT_FILENO, message, 40);
     } else {
-        printf("\nBackground processes are now disabled.\n");
+        char* message = "\nBackground processes are now disabled.\n"; 
+        write(STDOUT_FILENO, message, 41);
     }
     fflush(stdout);
 }
