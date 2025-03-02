@@ -132,8 +132,7 @@ void check_background_processes() {
 }
 
 void handle_SIGINT(int signo) {
-    char* message = "\nSIGINT is disabled for this process\n";
-    write(STDOUT_FILENO, message, 36);
+    // do nothing if child process
 }
 
 void handle_SIGTSTP(int signo) {
@@ -150,6 +149,9 @@ void handle_SIGTSTP(int signo) {
     fflush(stdout);
 }
 
+void handle_SIGCHLD(int signo) {
+    check_background_processes();  // Check for completed background jobs
+}
 
 void execute_command(struct command_line *cmd) {
     pid_t spawnPid = fork();
@@ -180,6 +182,41 @@ void execute_command(struct command_line *cmd) {
         SIGTSTP_action.sa_sigaction = NULL;         // Not used, initialize to NULL
         sigaction(SIGTSTP, &SIGTSTP_action, NULL);
 
+        // Handle input redirection if specified
+        if (cmd->input_file != NULL) {
+            int fd = open(cmd->input_file, O_RDONLY);
+            if (fd == -1) {
+                // Error: file doesn't exist
+                perror("Error opening input file");
+                exit(1);
+            }
+
+            // Redirect stdin to the input file
+            if (dup2(fd, STDIN_FILENO) == -1) {
+                perror("Error redirecting stdin");
+                close(fd);
+                exit(1);
+            }
+            close(fd); // Close file descriptor after duplicating
+        }
+
+        // Handle output redirection if specified
+        if (cmd->output_file != NULL) {
+            int fd = open(cmd->output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            if (fd == -1) {
+                perror("Error opening output file");
+                exit(1);
+            }
+
+            // Redirect stdout to the output file
+            if (dup2(fd, STDOUT_FILENO) == -1) {
+                perror("Error redirecting stdout");
+                close(fd);
+                exit(1);
+            }
+            close(fd); // Close file descriptor after duplicating
+        }
+
         // Execute the command
         execvp(cmd->argv[0], cmd->argv);
 
@@ -199,7 +236,6 @@ void execute_command(struct command_line *cmd) {
     }
 }
 
-
 int main() {
     struct command_line *curr_command;
 
@@ -207,22 +243,23 @@ int main() {
     struct sigaction SIGTSTP_action = {0};
     SIGTSTP_action.sa_handler = handle_SIGTSTP;
     SIGTSTP_action.sa_flags = 0;
-    SIGTSTP_action.sa_restorer = NULL;        // Not used, initialize to NULL
-    sigemptyset(&SIGTSTP_action.sa_mask);     // Initialize the signal mask (empty set)
-    SIGTSTP_action.sa_sigaction = NULL;       // Not used, initialize to NULL
+    sigemptyset(&SIGTSTP_action.sa_mask); 
     sigaction(SIGTSTP, &SIGTSTP_action, NULL);
 
     // Initialize sigaction for SIGINT (ignore SIGINT in the parent)
     struct sigaction SIGINT_action = {0};
-    SIGINT_action.sa_handler = handle_SIGINT; // Ignore SIGINT in parent
-    SIGINT_action.sa_flags = 0;
-    SIGINT_action.sa_restorer = NULL;         // Not used, initialize to NULL
-    sigemptyset(&SIGINT_action.sa_mask);      // Initialize the signal mask (empty set)
-    SIGINT_action.sa_sigaction = NULL;        // Not used, initialize to NULL
+    SIGINT_action.sa_handler = handle_SIGINT; 
+    sigemptyset(&SIGINT_action.sa_mask);      
     sigaction(SIGINT, &SIGINT_action, NULL);
 
+    // Initialize sigaction for SIGCHLD (child process termination)
+    struct sigaction SIGCHLD_action = {0};
+    SIGCHLD_action.sa_handler = handle_SIGCHLD; // Register the handler for SIGCHLD
+    sigemptyset(&SIGCHLD_action.sa_mask);
+    sigaction(SIGCHLD, &SIGCHLD_action, NULL);
+
     while (true) {
-        check_background_processes(); // Check for completed background jobs
+        // Main loop continues without blocking for background processes to complete
         curr_command = parse_input();
         if (!curr_command) continue; // Reprompt on blank or comment
 
