@@ -67,6 +67,16 @@ void handle_exit() {
     exit(EXIT_SUCCESS);
 }
 
+void free_command(struct command_line *cmd) {
+    if (!cmd) return;
+    for (int i = 0; i < cmd->argc; i++) {
+        free(cmd->argv[i]);
+    }
+    free(cmd->input_file);
+    free(cmd->output_file);
+    free(cmd);
+}
+
 void handle_cd(struct command_line *cmd) {
     char *target_dir;
 
@@ -109,6 +119,23 @@ void check_background_processes() {
         fflush(stdout);
     }
 }
+
+void handle_SIGINT(int signo) {
+    // Do nothing (parent ignores SIGINT)
+}
+
+void handle_SIGTSTP(int signo) {
+    // Toggle background command behavior
+    allow_bg = !allow_bg;
+
+    if (allow_bg) {
+        printf("\nBackground processes are now allowed.\n");
+    } else {
+        printf("\nBackground processes are now disabled.\n");
+    }
+    fflush(stdout);
+}
+
 
 void execute_command(struct command_line *cmd) {
     pid_t spawnPid = fork();
@@ -158,21 +185,6 @@ void execute_command(struct command_line *cmd) {
     }
 }
 
-void handle_SIGINT(int signo) {
-    // Do nothing (parent ignores SIGINT)
-}
-
-void handle_SIGTSTP(int signo) {
-    // Toggle background command behavior
-    allow_bg = !allow_bg;
-
-    if (allow_bg) {
-        printf("\nBackground processes are now allowed.\n");
-    } else {
-        printf("\nBackground processes are now disabled.\n");
-    }
-    fflush(stdout);
-}
 
 int main() {
     struct command_line *curr_command;
