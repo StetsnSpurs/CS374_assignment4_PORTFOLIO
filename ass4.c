@@ -18,21 +18,13 @@ int bg_count = 0;
 int last_fg_status = 0;
 static bool allow_bg = true;
 
-struct command_line
-{
+struct command_line {
     char *argv[MAX_ARGS + 1];
     int argc;
     char *input_file;
     char *output_file;
     bool is_bg;
 };
-
-void free_command(struct command_line *cmd) {
-    for (int i = 0; i < cmd->argc; i++) {
-        free(cmd->argv[i]);
-    }
-    free(cmd);
-}
 
 struct command_line *parse_input() {
     char input[INPUT_LENGTH];
@@ -127,15 +119,27 @@ void execute_command(struct command_line *cmd) {
     }
 
     if (spawnPid == 0) { // Child process
-        // Ignore SIGTSTP for both foreground and background processes
-        struct sigaction ignore_SIGTSTP = {0};
-        ignore_SIGTSTP.sa_handler = SIG_IGN;
-        sigaction(SIGTSTP, &ignore_SIGTSTP, NULL);
+        // Initialize sigaction structures for SIGINT and SIGTSTP
+        struct sigaction SIGINT_action = {0};
+        struct sigaction SIGTSTP_action = {0};
 
-        // Handle SIGINT
-        signal(SIGINT, SIG_DFL); // Allow child to terminate on SIGINT
+        // Initialize SIGINT action (parent ignores SIGINT)
+        SIGINT_action.sa_handler = handle_SIGINT;  // Ignore SIGINT in parent
+        SIGINT_action.sa_flags = 0;                 // No special flags
+        SIGINT_action.sa_restorer = NULL;           // Not used, initialize to NULL
+        sigemptyset(&SIGINT_action.sa_mask);        // Initialize the signal mask (empty set)
+        SIGINT_action.sa_sigaction = NULL;          // Not used, initialize to NULL
+        sigaction(SIGINT, &SIGINT_action, NULL);
 
-        // Execute command
+        // Initialize SIGTSTP action (ignore SIGTSTP)
+        SIGTSTP_action.sa_handler = handle_SIGTSTP; // Handle SIGTSTP toggle
+        SIGTSTP_action.sa_flags = 0;                // No special flags
+        SIGTSTP_action.sa_restorer = NULL;          // Not used, initialize to NULL
+        sigemptyset(&SIGTSTP_action.sa_mask);       // Initialize the signal mask (empty set)
+        SIGTSTP_action.sa_sigaction = NULL;         // Not used, initialize to NULL
+        sigaction(SIGTSTP, &SIGTSTP_action, NULL);
+
+        // Execute the command
         execvp(cmd->argv[0], cmd->argv);
 
         // If execvp fails:
@@ -144,7 +148,6 @@ void execute_command(struct command_line *cmd) {
     } else { // Parent process
         if (cmd->is_bg && allow_bg) {
             // Background process allowed
-            bg_processes[bg_count++] = spawnPid; // Track background process PID
             printf("Background PID: %d\n", spawnPid);
         } else {
             // No background process, or background not allowed
@@ -174,16 +177,22 @@ void handle_SIGTSTP(int signo) {
 int main() {
     struct command_line *curr_command;
 
+    // Initialize sigaction for SIGTSTP
     struct sigaction SIGTSTP_action = {0};
     SIGTSTP_action.sa_handler = handle_SIGTSTP;
-    sigfillset(&SIGTSTP_action.sa_mask);
     SIGTSTP_action.sa_flags = 0;
+    SIGTSTP_action.sa_restorer = NULL;        // Not used, initialize to NULL
+    sigemptyset(&SIGTSTP_action.sa_mask);     // Initialize the signal mask (empty set)
+    SIGTSTP_action.sa_sigaction = NULL;       // Not used, initialize to NULL
     sigaction(SIGTSTP, &SIGTSTP_action, NULL);
 
+    // Initialize sigaction for SIGINT (ignore SIGINT in the parent)
     struct sigaction SIGINT_action = {0};
-    SIGINT_action.sa_handler = handle_SIGINT; // Ignore SIGINT
-    sigfillset(&SIGINT_action.sa_mask);
+    SIGINT_action.sa_handler = handle_SIGINT; // Ignore SIGINT in parent
     SIGINT_action.sa_flags = 0;
+    SIGINT_action.sa_restorer = NULL;         // Not used, initialize to NULL
+    sigemptyset(&SIGINT_action.sa_mask);      // Initialize the signal mask (empty set)
+    SIGINT_action.sa_sigaction = NULL;        // Not used, initialize to NULL
     sigaction(SIGINT, &SIGINT_action, NULL);
 
     while (true) {
