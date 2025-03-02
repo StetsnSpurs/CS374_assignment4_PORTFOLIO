@@ -64,6 +64,15 @@ struct command_line *parse_input() {
 }
 
 
+void kill_bg_processes() {
+    for (int i = 0; i < bg_count; i++) {
+        if (kill(bg_processes[i], SIGTERM) == 0) {
+            printf("Killed process %d\n", bg_processes[i]);
+            fflush(stdout);
+        }
+    }
+}
+
 void handle_exit() {
     kill_bg_processes();
     exit(EXIT_SUCCESS);
