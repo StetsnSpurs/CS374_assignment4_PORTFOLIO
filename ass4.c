@@ -31,7 +31,7 @@ struct command_line *parse_input() {
     struct command_line *curr_command = (struct command_line *) calloc(1, sizeof(struct command_line));
 
     // Get input
-    printf(": ");
+    printf("\n: ");
     fflush(stdout);
     
     if (!fgets(input, INPUT_LENGTH, stdin)) {
@@ -69,7 +69,7 @@ struct command_line *parse_input() {
 void kill_bg_processes() {
     for (int i = 0; i < bg_count; i++) {
         if (kill(bg_processes[i], SIGTERM) == 0) {
-            printf("Killed process %d\n", bg_processes[i]);
+            printf("Killed process %d", bg_processes[i]);
             fflush(stdout);
         }
     }
@@ -97,7 +97,7 @@ void handle_cd(struct command_line *cmd) {
     if (cmd->argc == 1) {
         target_dir = getenv("HOME");
         if (!target_dir) {
-            fprintf(stderr, "cd: HOME not set\n");
+            fprintf(stderr, "cd: HOME not set");
             return;
         }
     } else {
@@ -112,9 +112,9 @@ void handle_cd(struct command_line *cmd) {
 
 void handle_status() {
     if (WIFEXITED(last_fg_status)) {
-        printf("exit status %d\n", WEXITSTATUS(last_fg_status));
+        printf("exit status %d", WEXITSTATUS(last_fg_status));
     } else if (WIFSIGNALED(last_fg_status)) {
-        printf("terminated by signal %d\n", WTERMSIG(last_fg_status));
+        printf("terminated by signal %d", WTERMSIG(last_fg_status));
     }
     fflush(stdout);
 }
@@ -125,9 +125,9 @@ void check_background_processes() {
     
     while ((pid = waitpid(-1, &childStatus, WNOHANG)) > 0) {
         if (WIFEXITED(childStatus)) {
-            printf("\nBackground PID %d terminated. Exit status: %d\n", pid, WEXITSTATUS(childStatus));
+            printf("\nBackground PID %d terminated. Exit status: %d", pid, WEXITSTATUS(childStatus));
         } else if (WIFSIGNALED(childStatus)) {
-            printf("\nBackground PID %d terminated by signal %d\n", pid, WTERMSIG(childStatus));
+            printf("\nBackground PID %d terminated by signal %d", pid, WTERMSIG(childStatus));
         }
         fflush(stdout);
     }
@@ -142,10 +142,10 @@ void handle_SIGTSTP(int signo) {
     allow_bg = !allow_bg;
 
     if (allow_bg) {
-        char* message = "\nBackground processes are now allowed.\n";
+        char* message = "Background processes are now allowed.";
         write(STDOUT_FILENO, message, 40);
     } else {
-        char* message = "\nBackground processes are now disabled.\n"; 
+        char* message = "Background processes are now disabled."; 
         write(STDOUT_FILENO, message, 41);
     }
     fflush(stdout);
@@ -223,12 +223,12 @@ void execute_command(struct command_line *cmd) {
         execvp(cmd->argv[0], cmd->argv);
 
         // If execvp fails:
-        fprintf(stderr, "%s: command not found\n", cmd->argv[0]);
+        fprintf(stderr, "%s: command not found", cmd->argv[0]);
         exit(1);
     } else { // Parent process
         if (cmd->is_bg && allow_bg) {
             // Background process allowed
-            printf("Background PID: %d\n", spawnPid);
+            printf("Background PID: %d", spawnPid);
         } else {
             // No background process, or background not allowed
             int childStatus;
