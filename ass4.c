@@ -13,6 +13,11 @@
 #define MAX_ARGS 512
 #define MAX_BG_PROCESSES 100
 
+// Program name: McCaffertyKeiranmccafkei_proj4.c
+// Author: Keiran McCafferty
+// This program is a shell program with comments allowed using "#" and background process allowed using "&". It supports input and output redirection and
+// has two custom handlers for SIGINT and SIGTSTP.
+
 pid_t bg_processes[MAX_BG_PROCESSES];
 int bg_count = 0;
 int last_fg_status = 0;
@@ -64,7 +69,6 @@ struct command_line *parse_input() {
 
     return curr_command;
 }
-
 
 void kill_bg_processes() {
     for (int i = 0; i < bg_count; i++) {
