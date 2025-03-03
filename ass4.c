@@ -97,7 +97,8 @@ void handle_cd(struct command_line *cmd) {
     if (cmd->argc == 1) {
         target_dir = getenv("HOME");
         if (!target_dir) {
-            fprintf(stderr, "cd HOME not set\n");
+            fprintf(stderr, "cd: HOME not set\n");
+            fflush(stdout);
             return;
         }
     } else {
@@ -106,15 +107,18 @@ void handle_cd(struct command_line *cmd) {
 
     // Attempt to change directory
     if (chdir(target_dir) != 0) {
-        fprintf(stderr, "cd %s %s\n", target_dir, strerror(errno));
+        fprintf(stderr, "cd: %s: %s\n", target_dir, strerror(errno));
+        fflush(stdout);
     }
 }
 
 void handle_status() {
     if (WIFEXITED(last_fg_status)) {
         printf("exit status %d\n", WEXITSTATUS(last_fg_status));
+        fflush(stdout);
     } else if (WIFSIGNALED(last_fg_status)) {
         printf("terminated by signal %d\n", WTERMSIG(last_fg_status));
+        fflush(stdout);
     }
     fflush(stdout);
 }
@@ -125,9 +129,11 @@ void check_background_processes() {
     
     while ((pid = waitpid(-1, &childStatus, WNOHANG)) > 0) {
         if (WIFEXITED(childStatus)) {
-            printf("Background PID %d terminated. Exit status %d\n", pid, WEXITSTATUS(childStatus));
+            printf("Background PID %d terminated. Exit status: %d\n", pid, WEXITSTATUS(childStatus));
+            fflush(stdout);
         } else if (WIFSIGNALED(childStatus)) {
             printf("Background PID %d terminated by signal %d\n", pid, WTERMSIG(childStatus));
+            fflush(stdout);
         }
         fflush(stdout);
     }
@@ -144,9 +150,11 @@ void handle_SIGTSTP(int signo) {
     if (allow_bg) {
         char* message = "\nBackground processes are now allowed.\n";
         write(STDOUT_FILENO, message, 40);
+        fflush(stdout);
     } else {
         char* message = "\nBackground processes are now disabled.\n"; 
         write(STDOUT_FILENO, message, 41);
+        fflush(stdout);
     }
     fflush(stdout);
 }
@@ -160,6 +168,7 @@ void execute_command(struct command_line *cmd) {
 
     if (spawnPid == -1) {
         perror("fork failed");
+        fflush(stdout);
         exit(1);
     }
 
@@ -190,12 +199,14 @@ void execute_command(struct command_line *cmd) {
             if (fd == -1) {
                 // Error: file doesn't exist
                 perror("Error opening input file");
+                fflush(stdout);
                 exit(1);
             }
 
             // Redirect stdin to the input file
             if (dup2(fd, STDIN_FILENO) == -1) {
                 perror("Error redirecting stdin");
+                fflush(stdout);
                 close(fd);
                 exit(1);
             }
@@ -207,12 +218,14 @@ void execute_command(struct command_line *cmd) {
             int fd = open(cmd->output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
             if (fd == -1) {
                 perror("Error opening output file");
+                fflush(stdout);
                 exit(1);
             }
 
             // Redirect stdout to the output file
             if (dup2(fd, STDOUT_FILENO) == -1) {
                 perror("Error redirecting stdout");
+                fflush(stdout);
                 close(fd);
                 exit(1);
             }
@@ -223,12 +236,14 @@ void execute_command(struct command_line *cmd) {
         execvp(cmd->argv[0], cmd->argv);
 
         // If execvp fails:
-        fprintf(stderr, "%s command not found\n", cmd->argv[0]);
+        fprintf(stderr, "%s: command not found\n", cmd->argv[0]);
+        fflush(stdout);
         exit(1);
     } else { // Parent process
         if (cmd->is_bg && allow_bg) {
             // Background process allowed
-            printf("Background PID %d\n", spawnPid);
+            printf("Background PID: %d\n", spawnPid);
+            fflush(stdout);
         } else {
             // No background process, or background not allowed
             int childStatus;
