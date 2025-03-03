@@ -97,7 +97,7 @@ void handle_cd(struct command_line *cmd) {
     if (cmd->argc == 1) {
         target_dir = getenv("HOME");
         if (!target_dir) {
-            fprintf(stderr, "cd: HOME not set\n");
+            fprintf(stderr, "cd HOME not set\n");
             return;
         }
     } else {
@@ -106,7 +106,7 @@ void handle_cd(struct command_line *cmd) {
 
     // Attempt to change directory
     if (chdir(target_dir) != 0) {
-        fprintf(stderr, "cd: %s: %s\n", target_dir, strerror(errno));
+        fprintf(stderr, "cd %s %s\n", target_dir, strerror(errno));
     }
 }
 
@@ -125,7 +125,7 @@ void check_background_processes() {
     
     while ((pid = waitpid(-1, &childStatus, WNOHANG)) > 0) {
         if (WIFEXITED(childStatus)) {
-            printf("Background PID %d terminated. Exit status: %d\n", pid, WEXITSTATUS(childStatus));
+            printf("Background PID %d terminated. Exit status %d\n", pid, WEXITSTATUS(childStatus));
         } else if (WIFSIGNALED(childStatus)) {
             printf("Background PID %d terminated by signal %d\n", pid, WTERMSIG(childStatus));
         }
@@ -223,12 +223,12 @@ void execute_command(struct command_line *cmd) {
         execvp(cmd->argv[0], cmd->argv);
 
         // If execvp fails:
-        fprintf(stderr, "%s: command not found\n", cmd->argv[0]);
+        fprintf(stderr, "%s command not found\n", cmd->argv[0]);
         exit(1);
     } else { // Parent process
         if (cmd->is_bg && allow_bg) {
             // Background process allowed
-            printf("Background PID: %d\n", spawnPid);
+            printf("Background PID %d\n", spawnPid);
         } else {
             // No background process, or background not allowed
             int childStatus;
