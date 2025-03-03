@@ -54,6 +54,8 @@ struct command_line *parse_input() {
             curr_command->output_file = strdup(strtok(NULL, " \n"));
         } else if (!strcmp(token, "&") && allow_bg) {
             curr_command->is_bg = true;
+        } else if (!strcmp(token, "&") && !allow_bg) {
+            curr_command->is_bg = false;
         } else {
             curr_command->argv[curr_command->argc++] = strdup(token);
         }
@@ -123,9 +125,9 @@ void check_background_processes() {
     
     while ((pid = waitpid(-1, &childStatus, WNOHANG)) > 0) {
         if (WIFEXITED(childStatus)) {
-            printf("Background PID %d terminated. Exit status: %d\n", pid, WEXITSTATUS(childStatus));
+            printf("\nBackground PID %d terminated. Exit status: %d\n", pid, WEXITSTATUS(childStatus));
         } else if (WIFSIGNALED(childStatus)) {
-            printf("Background PID %d terminated by signal %d\n", pid, WTERMSIG(childStatus));
+            printf("\nBackground PID %d terminated by signal %d\n", pid, WTERMSIG(childStatus));
         }
         fflush(stdout);
     }
